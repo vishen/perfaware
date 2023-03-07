@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-var debugFlag = flag.Bool("debug", false, "debug output")
-
 func main() {
 	flag.Parse()
 
@@ -24,131 +22,117 @@ func main() {
 
 func disassemble(data []byte) {
 	di := 0
+	// read next byte
 	read := func() byte {
 		b := data[di]
 		di++
 		return b
 	}
 
+	// read an immediate
 	rImm := func() uint16 {
 		return uint16(read())
 	}
 
-	for {
-		if di >= len(data) {
-			break
-		}
+	// read full 16-bit immediate
+	rImmFull := func() uint16 {
+		return rImm() | (rImm() << 8)
+	}
 
-		var in inst
+	handleModRM := func(mod, rm, w byte) field {
+		var f field
+		switch mod {
+		case 0b00: // Memory mode, no displacement *
+			f.ptr = true
+			if rm == 0b110 { // * special case
+				f.imm = rImmFull()
+			} else {
+				ea := effectiveAddr[rm]
+				f.reg1, f.reg2 = ea[0], ea[1]
+				f.ptr = true
+			}
+		case 0b01: // Memory mode, 8-bit displacement
+			ea := effectiveAddr[rm]
+			f.reg1, f.reg2 = ea[0], ea[1]
+			f.imm = rImm()
+			f.ptr = true
+		case 0b10: // Memory mode, 16-bit displacement
+			// TODO
+			ea := effectiveAddr[rm]
+			f.reg1, f.reg2 = ea[0], ea[1]
+			f.imm = rImmFull()
+			f.ptr = true
+		case 0b11: // Register mode (no displacement)
+			f.reg1 = register(rm, w)
+		}
+		return f
+	}
+
+	for di < len(data) {
+		in := newInst()
 
 		b1 := read()
 		switch {
-		case b1>>1 == 0b1010000:
+		case checkOp(b1, MOV_MEM__TO__ACC):
 			_, w := dw(b1)
 			in.name = "mov"
-			in.field1.reg1 = Reg(w<<3 | byte(AL))
-			in.field2.imm = rImm() | (rImm() << 8)
+			in.field1.reg1 = register(0b000, w)
+			in.field2.imm = rImmFull()
 			in.field2.ptr = true
-			in.field2.reg1, in.field2.reg2 = NoReg, NoReg
-			fmt.Println(in.String())
-		case b1>>1 == 0b1010001:
+		case checkOp(b1, MOV_ACC__TO__MEM):
 			_, w := dw(b1)
 			in.name = "mov"
-			in.field2.reg1 = Reg(w<<3 | byte(AL))
-			in.field1.imm = rImm() | (rImm() << 8)
+			in.field1.imm = rImmFull()
 			in.field1.ptr = true
-			in.field1.reg1, in.field1.reg2 = NoReg, NoReg
-			fmt.Println(in.String())
-		case b1>>1 == 0b1100011:
+			in.field2.reg1 = register(0b000, w)
+		case checkOp(b1, MOV_IMM__TO__REG_OR_MEM):
 			_, w := dw(b1)
 			mod, _, rm := modrm(read())
-
 			in.name = "mov"
-			switch mod {
-			case 0b00: // Memory mode, no displacement *
-				if rm == 0b110 {
-					panic("* unhandled special case; direct address")
-				}
-				ea := effectiveAddr[rm]
-				in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-				in.field1.ptr = true
-			case 0b01: // Memory mode, 8-bit displacement
-				ea := effectiveAddr[rm]
-				in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-				in.field1.imm = rImm()
-				in.field1.ptr = true
-			case 0b10: // Memory mode, 16-bit displacement
-				// TODO
-				ea := effectiveAddr[rm]
-				in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-				in.field1.imm = rImm() | (rImm() << 8)
-				in.field1.ptr = true
-			case 0b11: // Register mode (no displacement)
-				in.field1.reg1 = register(rm, w)
-			}
+			in.field1 = handleModRM(mod, rm, w)
 			in.field2.imm = rImm()
 			in.field2.size = sizeByte
 			if w > 0 {
 				in.field2.imm |= (rImm() << 8)
 				in.field2.size = sizeWord
 			}
-			fmt.Println(in.String())
-		case b1>>2 == 0b100010:
+		case checkOp(b1, MOV_REG_OR_MEM__TO_OR_FROM__REG):
 			d, w := dw(b1)
 			mod, reg, rm := modrm(read())
 			dst := register(reg, w)
-
 			in.name = "mov"
+			in.field1 = handleModRM(mod, rm, w)
 			in.field2.reg1 = dst
-
-			switch mod {
-			case 0b00: // Memory mode, no displacement *
-				in.field1.ptr = true
-				if rm == 0b110 {
-					in.field1.reg1, in.field1.reg2 = NoReg, NoReg
-					in.field1.imm = rImm() | (rImm() << 8)
-				} else {
-					ea := effectiveAddr[rm]
-					in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-					in.field1.ptr = true
-				}
-			case 0b01: // Memory mode, 8-bit displacement
-				ea := effectiveAddr[rm]
-				in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-				in.field1.imm = rImm()
-				in.field1.ptr = true
-			case 0b10: // Memory mode, 16-bit displacement
-				// TODO
-				ea := effectiveAddr[rm]
-				in.field1.reg1, in.field1.reg2 = ea[0], ea[1]
-				in.field1.imm = rImm() | (rImm() << 8)
-				in.field1.ptr = true
-			case 0b11: // Register mode (no displacement)
-				in.field1.reg1 = register(rm, w)
-			}
 			if d > 0 {
 				in.field1, in.field2 = in.field2, in.field1
 			}
-			fmt.Println(in.String())
-		case b1>>4 == 0b1011:
+		case checkOp(b1, MOV_IMM__TO__REG):
 			w := (b1 >> 3) & 0b1
 			reg := b1 & 0b111
-			src := register(reg, w)
-			imm := rImm()
-			if w == 1 {
-				imm2 := rImm()
-				imm |= (imm2 << 8)
+			in.name = "mov"
+			in.field1.reg1 = register(reg, w)
+			if w > 0 {
+				in.field2.imm = rImmFull()
+			} else {
+				in.field2.imm = rImm()
 			}
-			fmt.Printf("mov %s, %d\n", formatReg(src), imm)
 		default:
 			panic("unsupported opcode")
 		}
+		fmt.Println(in.String())
 	}
 }
 
 type inst struct {
 	name           string
 	field1, field2 field
+}
+
+func newInst() inst {
+	return inst{
+		field1: field{reg1: NoReg, reg2: NoReg},
+		field2: field{reg1: NoReg, reg2: NoReg},
+	}
 }
 
 func (i inst) String() string {
@@ -293,14 +277,18 @@ func formatReg(r Reg) string {
 	return "INVALID REG"
 }
 
-func assert(cond bool, msg string, args ...any) {
-	if !cond {
-		panic(fmt.Sprintf(msg, args...))
-	}
+type opcode struct {
+	shift, id byte
 }
 
-func debug(msg string, args ...any) {
-	if *debugFlag {
-		fmt.Printf(msg, args...)
-	}
+func checkOp(b byte, op opcode) bool {
+	return b>>op.shift == op.id
 }
+
+var (
+	MOV_REG_OR_MEM__TO_OR_FROM__REG = opcode{2, 0b100010}
+	MOV_IMM__TO__REG_OR_MEM         = opcode{1, 0b1100011}
+	MOV_IMM__TO__REG                = opcode{4, 0b1011}
+	MOV_MEM__TO__ACC                = opcode{1, 0b1010000}
+	MOV_ACC__TO__MEM                = opcode{1, 0b1010001}
+)
