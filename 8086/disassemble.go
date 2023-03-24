@@ -113,19 +113,38 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 		Opcode: enc.Opcode.Opcode,
 	}
 
+	setOperand1 := false
+	set := func(o Operand) {
+		if !setOperand1 {
+			in.Operand1 = o
+			setOperand1 = true
+		}
+		in.Operand2 = o
+	}
+
 	seen := map[string]struct{}{}
 	has := func(name string) bool {
 		_, ok := seen[name]
 		return ok
 	}
+	w := func() byte {
+		if has("W") {
+			return in.W
+		}
+		return 1
+	}
 	for _, b := range enc.Bytes {
 		for _, p := range b {
 			seen[p.Name] = struct{}{}
-			switch p.Name {
+			switch pname := p.Name; pname {
+			case "DX":
+				set(Operand{Reg1: DX})
+			case "ACC":
+				set(Operand{Reg1: register(0b000, w())})
 			case "ACCDST":
-				in.Operand1.Reg1 = register(0b000, in.W)
+				in.Operand1.Reg1 = register(0b000, w())
 			case "ACCSRC":
-				in.Operand2.Reg1 = register(0b000, in.W)
+				in.Operand2.Reg1 = register(0b000, w())
 			case "S":
 				in.S = d.read(p.Len)
 			case "D":
@@ -136,37 +155,47 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				in.Mod = d.read(p.Len)
 			case "REG":
 				in.Reg = d.read(p.Len)
-				if has("W") {
-					in.Operand1.Reg1 = register(in.Reg, in.W)
-				} else {
-					in.Operand1.Reg1 = register(in.Reg, 1)
-				}
+				set(Operand{Reg1: register(in.Reg, w())})
+			case "REGDST":
+				in.Reg = d.read(p.Len)
+				in.Operand1.Reg1 = register(in.Reg, w())
+			case "REGSRC":
+				in.Reg = d.read(p.Len)
+				in.Operand2.Reg1 = register(in.Reg, w())
 			case "RM":
 				in.RM = d.read(p.Len)
 				if has("REG") {
 					in.Operand1, in.Operand2 = in.Operand2, in.Operand1
 				}
+			case "RMSRC":
+				in.RM = d.read(p.Len)
 			case "SR":
 				switch d.read(p.Len) {
 				case 0b00:
-					in.Operand1.Reg1 = ES
+					set(Operand{Reg1: ES})
 				case 0b01:
-					in.Operand1.Reg1 = CS
+					set(Operand{Reg1: CS})
 				case 0b10:
-					in.Operand1.Reg1 = SS
+					set(Operand{Reg1: SS})
 				case 0b011:
-					in.Operand1.Reg1 = DS
+					set(Operand{Reg1: DS})
+				}
+			case "DATAW":
+				if in.W > 0 && in.S == 0 {
+					set(Operand{Imm: d.imm16()})
+				} else {
+					set(Operand{Imm: d.imm8()})
 				}
 			case "DATA":
-				// Do nothing
+				set(Operand{Imm: d.imm8()})
 			case "ADDRLO", "ADDRHI":
 				if has("ACCDST") {
 					in.Operand2.Ptr = true
 				} else if has("ACCSRC") {
 					in.Operand1.Ptr = true
 				}
-			case "DISPLO", "DISPHI", "DATAW":
-				// IGNORE
+			case "DISP":
+				// Ignore
 			default:
 				// Constant
 				c := d.read(p.Len)
@@ -183,13 +212,10 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 		}
 	}
 	if has("MOD") {
-		in.Operand1 = d.handleModRM(in.Mod, in.RM, in.W)
-	}
-	if has("DATA") {
-		if in.W > 0 && in.S == 0 {
-			in.Operand2.Imm = d.imm16()
+		if has("RMSRC") {
+			in.Operand2 = d.handleModRM(in.Mod, in.RM, in.W)
 		} else {
-			in.Operand2.Imm = d.imm8()
+			in.Operand1 = d.handleModRM(in.Mod, in.RM, in.W)
 		}
 	}
 	if has("ADDRLO") {

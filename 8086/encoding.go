@@ -23,16 +23,21 @@ var sizes = map[string]int{
 	"MOD":    2,
 	"SR":     2,
 	"REG":    3,
+	"REGSRC": 3,
+	"REGDST": 3,
 	"RM":     3,
-	"DISPLO": 8,
-	"DISPHI": 8,
+	"RMSRC":  3,
+	"DISP":   8,
 	"DATA":   8,
 	"DATAW":  8,
 	"ADDRLO": 8,
 	"ADDRHI": 8,
+
 	// TODO: These sizes should be zero, but the parser doesn't currently handle it
 	"ACCDST": 8,
 	"ACCSRC": 8,
+	"ACC":    8,
+	"DX":     8,
 }
 
 func sizeOf(val string) int {

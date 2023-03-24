@@ -1,2 +1,3 @@
-mov ax, [2555]
-mov [2555], ax
+out 44, ax
+out dx, al
+
