@@ -113,43 +113,37 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 		Opcode: enc.Opcode.Opcode,
 	}
 
-	hasMod := false
-	hasData := false
-	hasReg := false
-	hasW := false
-	hasAccDst := false
-	hasAccSrc := false
-	hasAddr := false
+	seen := map[string]struct{}{}
+	has := func(name string) bool {
+		_, ok := seen[name]
+		return ok
+	}
 	for _, b := range enc.Bytes {
 		for _, p := range b {
+			seen[p.Name] = struct{}{}
 			switch p.Name {
 			case "ACCDST":
 				in.Operand1.Reg1 = register(0b000, in.W)
-				hasAccDst = true
 			case "ACCSRC":
 				in.Operand2.Reg1 = register(0b000, in.W)
-				hasAccSrc = true
 			case "S":
 				in.S = d.read(p.Len)
 			case "D":
 				in.D = d.read(p.Len)
 			case "W":
 				in.W = d.read(p.Len)
-				hasW = true
 			case "MOD":
 				in.Mod = d.read(p.Len)
-				hasMod = true
 			case "REG":
-				hasReg = true
 				in.Reg = d.read(p.Len)
-				if hasW {
+				if has("W") {
 					in.Operand1.Reg1 = register(in.Reg, in.W)
 				} else {
 					in.Operand1.Reg1 = register(in.Reg, 1)
 				}
 			case "RM":
 				in.RM = d.read(p.Len)
-				if hasReg {
+				if has("REG") {
 					in.Operand1, in.Operand2 = in.Operand2, in.Operand1
 				}
 			case "SR":
@@ -164,12 +158,11 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 					in.Operand1.Reg1 = DS
 				}
 			case "DATA":
-				hasData = true
+				// Do nothing
 			case "ADDRLO", "ADDRHI":
-				hasAddr = true
-				if hasAccDst {
+				if has("ACCDST") {
 					in.Operand2.Ptr = true
-				} else if hasAccSrc {
+				} else if has("ACCSRC") {
 					in.Operand1.Ptr = true
 				}
 			case "DISPLO", "DISPHI", "DATAW":
@@ -189,25 +182,25 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 			}
 		}
 	}
-	if hasMod {
+	if has("MOD") {
 		in.Operand1 = d.handleModRM(in.Mod, in.RM, in.W)
 	}
-	if hasData {
+	if has("DATA") {
 		if in.W > 0 && in.S == 0 {
 			in.Operand2.Imm = d.imm16()
 		} else {
 			in.Operand2.Imm = d.imm8()
 		}
 	}
-	if hasAddr {
+	if has("ADDRLO") {
 		if in.W > 0 {
-			if hasAccDst {
+			if has("ACCDST") {
 				in.Operand2.Imm = d.imm16()
 			} else {
 				in.Operand1.Imm = d.imm16()
 			}
 		} else {
-			if hasAccDst {
+			if has("ACCDST") {
 				in.Operand2.Imm = d.imm8()
 			} else {
 				in.Operand1.Imm = d.imm8()
