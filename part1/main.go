@@ -213,8 +213,6 @@ func register(r byte, w byte) Reg {
 	return Reg((w << 3) | r)
 }
 
-type Reg int
-
 const (
 	// W = 0
 	AL Reg = 0b000
