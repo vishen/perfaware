@@ -30,6 +30,9 @@ var sizes = map[string]int{
 	"DATAW":  8,
 	"ADDRLO": 8,
 	"ADDRHI": 8,
+	// TODO: These sizes should be zero, but the parser doesn't currently handle it
+	"ACCDST": 8,
+	"ACCSRC": 8,
 }
 
 func sizeOf(val string) int {
@@ -137,7 +140,6 @@ func NewEncoder(instructionEncodings string) Encoder {
 		}
 		e.encodings = append(e.encodings, enc)
 	}
-
 	return e
 }
 

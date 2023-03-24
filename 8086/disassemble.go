@@ -11,154 +11,213 @@ func disassemble(data []byte) []Instruction {
 		fmt.Printf("%08b\n", d)
 	}
 
-	di := 0
-
-	// read next byte
-	next := func() byte {
-		b := data[di]
-		di++
-		return b
-	}
-
-	// read an 8-bit immediate
-	imm8 := func() uint16 {
-		return uint16(next())
-	}
-
-	// read full 16-bit immediate
-	imm16 := func() uint16 {
-		return imm8() | (imm8() << 8)
-	}
-
-	handleModRM := func(mod, rm, w byte) Operand {
-		var o Operand
-		switch mod {
-		case 0b00: // Memory mode, no displacement *
-			o.Ptr = true
-			if rm == 0b110 { // * special case
-				o.Imm = imm16()
-			} else {
-				ea := effectiveAddr[rm]
-				o.Reg1, o.Reg2 = ea[0], ea[1]
-				o.Ptr = true
-			}
-		case 0b01: // Memory mode, 8-bit displacement
-			ea := effectiveAddr[rm]
-			o.Reg1, o.Reg2 = ea[0], ea[1]
-			o.Imm = imm8()
-			o.Ptr = true
-		case 0b10: // Memory mode, 16-bit displacement
-			ea := effectiveAddr[rm]
-			o.Reg1, o.Reg2 = ea[0], ea[1]
-			o.Imm = imm16()
-			o.Ptr = true
-		case 0b11: // Register mode (no displacement)
-			o.Reg1 = register(rm, w)
-		}
-		return o
-	}
-
-	for di < len(data) {
-		b := next()
-		bi := 0
-
-		read := func(length int) byte {
-			if bi == 8 {
-				b = next()
-				bi = 0
-			}
-			d := (b >> (8 - (bi + length))) & mask(length)
-			bi += length
-			return d
-		}
-
+	d := &disassembler{data: data}
+	for d.di < len(data) {
+		b := d.next()
 		encs := encoder.Decode(b)
 		if len(encs) == 0 {
-			log.Fatalf("unable to decode %08b at pos %d", b, di)
+			log.Fatalf("unable to decode %08b at pos %d", b, d.di)
 		}
 
-		enc := encs[0]
-
-		in := Instruction{
-			Name:   enc.Name,
-			Opcode: enc.Opcode.Opcode,
-		}
-
-		hasMod := false
-		hasData := false
-		hasReg := false
-		hasW := false
-		for _, b := range enc.Bytes {
-			for _, p := range b {
-				switch p.Name {
-				case "S":
-					in.S = read(p.Len)
-				case "D":
-					in.D = read(p.Len)
-				case "W":
-					in.W = read(p.Len)
-					hasW = true
-				case "MOD":
-					in.Mod = read(p.Len)
-					hasMod = true
-				case "REG":
-					hasReg = true
-					in.Reg = read(p.Len)
-					if hasW {
-						in.Operand1.Reg1 = register(in.Reg, in.W)
-					} else {
-						in.Operand1.Reg1 = register(in.Reg, 1)
-					}
-				case "RM":
-					in.RM = read(p.Len)
-					if hasReg {
-						in.Operand1, in.Operand2 = in.Operand2, in.Operand1
-					}
-				case "SR":
-					switch read(p.Len) {
-					case 0b00:
-						in.Operand1.Reg1 = ES
-					case 0b01:
-						in.Operand1.Reg1 = CS
-					case 0b10:
-						in.Operand1.Reg1 = SS
-					case 0b011:
-						in.Operand1.Reg1 = DS
-					}
-				case "DATA":
-					hasData = true
-				case "DISPLO", "DISPHI", "DATAW":
-					// IGNORE
-				default:
-					// Constant
-					c := read(p.Len)
-					if c != p.Const {
-						fmt.Println(encs)
-						fmt.Println(b)
-						fmt.Println(p, c, p.Const)
-						log.Fatalf("CONSTANT NOT CORRECT, FIX ME")
-					}
-
-				}
+		found := false
+		for _, enc := range encs {
+			in, ok := d.parse(enc)
+			if !ok {
+				continue
 			}
+			found = true
+			fmt.Println(in)
 		}
-		if hasMod {
-			in.Operand1 = handleModRM(in.Mod, in.RM, in.W)
+		if !found {
+			log.Fatalf("unable to find instruction encoding for %08b at index %d", b, d.di-1)
 		}
-		if hasData {
-			if in.W > 0 && in.S == 0 {
-				in.Operand2.Imm = imm16()
-			} else {
-				in.Operand2.Imm = imm8()
-			}
-		}
-		if in.D > 0 {
-			in.Operand1, in.Operand2 = in.Operand2, in.Operand1
-		}
-		fmt.Println(in)
 	}
 
 	return nil
+}
+
+type disassembler struct {
+	data []byte
+	di   int
+
+	curByte byte
+	cbi     int
+}
+
+// read a portion of the current byte
+func (d *disassembler) read(length int) byte {
+	if d.cbi == 8 {
+		d.curByte = d.next()
+		d.cbi = 0
+	}
+	bd := (d.curByte >> (8 - (d.cbi + length))) & mask(length)
+	d.cbi += length
+	return bd
+}
+
+// next returns the next byte in the input
+func (d *disassembler) next() byte {
+	b := d.data[d.di]
+	d.di++
+	d.curByte = b
+	d.cbi = 0
+	return b
+}
+
+// read an 8-bit immediate
+func (d *disassembler) imm8() uint16 {
+	return uint16(d.next())
+}
+
+// read full 16-bit immediate
+func (d *disassembler) imm16() uint16 {
+	return d.imm8() | (d.imm8() << 8)
+}
+
+func (d *disassembler) handleModRM(mod, rm, w byte) Operand {
+	var o Operand
+	switch mod {
+	case 0b00: // Memory mode, no displacement *
+		o.Ptr = true
+		if rm == 0b110 { // * special case
+			o.Imm = d.imm16()
+		} else {
+			ea := effectiveAddr[rm]
+			o.Reg1, o.Reg2 = ea[0], ea[1]
+			o.Ptr = true
+		}
+	case 0b01: // Memory mode, 8-bit displacement
+		ea := effectiveAddr[rm]
+		o.Reg1, o.Reg2 = ea[0], ea[1]
+		o.Imm = d.imm8()
+		o.Ptr = true
+	case 0b10: // Memory mode, 16-bit displacement
+		ea := effectiveAddr[rm]
+		o.Reg1, o.Reg2 = ea[0], ea[1]
+		o.Imm = d.imm16()
+		o.Ptr = true
+	case 0b11: // Register mode (no displacement)
+		o.Reg1 = register(rm, w)
+	}
+	return o
+}
+
+func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
+	di, curByte, cbi := d.di, d.curByte, d.cbi
+	rollback := func() {
+		d.di, d.curByte, d.cbi = di, curByte, cbi
+	}
+
+	in := Instruction{
+		Name:   enc.Name,
+		Opcode: enc.Opcode.Opcode,
+	}
+
+	hasMod := false
+	hasData := false
+	hasReg := false
+	hasW := false
+	hasAccDst := false
+	hasAccSrc := false
+	hasAddr := false
+	for _, b := range enc.Bytes {
+		for _, p := range b {
+			switch p.Name {
+			case "ACCDST":
+				in.Operand1.Reg1 = register(0b000, in.W)
+				hasAccDst = true
+			case "ACCSRC":
+				in.Operand2.Reg1 = register(0b000, in.W)
+				hasAccSrc = true
+			case "S":
+				in.S = d.read(p.Len)
+			case "D":
+				in.D = d.read(p.Len)
+			case "W":
+				in.W = d.read(p.Len)
+				hasW = true
+			case "MOD":
+				in.Mod = d.read(p.Len)
+				hasMod = true
+			case "REG":
+				hasReg = true
+				in.Reg = d.read(p.Len)
+				if hasW {
+					in.Operand1.Reg1 = register(in.Reg, in.W)
+				} else {
+					in.Operand1.Reg1 = register(in.Reg, 1)
+				}
+			case "RM":
+				in.RM = d.read(p.Len)
+				if hasReg {
+					in.Operand1, in.Operand2 = in.Operand2, in.Operand1
+				}
+			case "SR":
+				switch d.read(p.Len) {
+				case 0b00:
+					in.Operand1.Reg1 = ES
+				case 0b01:
+					in.Operand1.Reg1 = CS
+				case 0b10:
+					in.Operand1.Reg1 = SS
+				case 0b011:
+					in.Operand1.Reg1 = DS
+				}
+			case "DATA":
+				hasData = true
+			case "ADDRLO", "ADDRHI":
+				hasAddr = true
+				if hasAccDst {
+					in.Operand2.Ptr = true
+				} else if hasAccSrc {
+					in.Operand1.Ptr = true
+				}
+			case "DISPLO", "DISPHI", "DATAW":
+				// IGNORE
+			default:
+				// Constant
+				c := d.read(p.Len)
+
+				// Constant not correct, likely not the correct instruction
+				if c != p.Const {
+					// fmt.Printf("error: found constant %v that didn't match %0b\n", p, c)
+					// Rollback to the original index in the data if we don't find a matching
+					// instruction
+					rollback()
+					return Instruction{}, false
+				}
+			}
+		}
+	}
+	if hasMod {
+		in.Operand1 = d.handleModRM(in.Mod, in.RM, in.W)
+	}
+	if hasData {
+		if in.W > 0 && in.S == 0 {
+			in.Operand2.Imm = d.imm16()
+		} else {
+			in.Operand2.Imm = d.imm8()
+		}
+	}
+	if hasAddr {
+		if in.W > 0 {
+			if hasAccDst {
+				in.Operand2.Imm = d.imm16()
+			} else {
+				in.Operand1.Imm = d.imm16()
+			}
+		} else {
+			if hasAccDst {
+				in.Operand2.Imm = d.imm8()
+			} else {
+				in.Operand1.Imm = d.imm8()
+			}
+		}
+	}
+	if in.D > 0 {
+		in.Operand1, in.Operand2 = in.Operand2, in.Operand1
+	}
+	return in, true
 }
 
 var effectiveAddr = map[byte][2]Reg{
@@ -301,14 +360,14 @@ func (o Operand) String() string {
 			if written {
 				sb.WriteString(" + ")
 			}
-			sb.WriteString(fmt.Sprintf("0x%x", o.Imm))
+			sb.WriteString(fmt.Sprintf("%d", o.Imm))
 		}
 		sb.WriteString(fmt.Sprintf("]"))
 	} else if o.Imm > 0 {
 		if o.Size != "" {
 			sb.WriteString(fmt.Sprintf("%s ", o.Size))
 		}
-		sb.WriteString(fmt.Sprintf("0x%x", o.Imm))
+		sb.WriteString(fmt.Sprintf("%d", o.Imm))
 	} else {
 		sb.WriteString(formatReg(o.Reg1))
 	}
