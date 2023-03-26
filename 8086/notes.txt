@@ -1,0 +1,93 @@
+
+# Single Bit Field Encoding
+
+- S
+	- 0: No sign extension
+	- 1: Sign extend 8-bit immediate data to 16 bits if W=1
+- W
+	- 0: Instruction operates on 8-bit byte
+	- 1: Instruction operates on 16-bit word
+- D
+	- 0: Instruction source is in REG
+	- 1: Instruction destination is in REG
+- V
+	- 0: Shift/rotate count is 1
+	- 1: Shift/rotate count is specified in CL
+- Z
+	- 0: Repeat/loop while zero flag is clear
+	- 1: Repeat/loop while zero flag is set
+
+# MOD
+
+The MOD (mode) field indiciates whether one of the operands is in memory, or if both are
+registers.
+
+- 00: Memory mode; no displacement follows (except when RM == 110, then 16-bit displacement follows)
+- 01: Memory mode; 8-bit displacement follows
+- 10: Memory mode; 16-bit displacement follows
+- 11: Register mode; no displacement
+
+# REG
+
+The REG (register) field identifies a register that is ONE of the instruction operands.
+In a number of instructions, mainly 'immediate-to-memory' variety, the REG field is used
+as an extension of the opcode to identify the type of operation.
+
+  REG | W=0 | W=1
+- 000 | AL  | AX
+- 001 | CL  | CX
+- 010 | DL  | DX
+- 011 | BL  | BX
+- 100 | AH  | SP
+- 101 | CH  | BP
+- 110 | DH  | SI
+- 111 | BH  | DI
+
+# RM
+
+The RM (register/memory) field depends on how the MOD (mode) field is set.
+IF MOD == 11 (register-to-register mode) THEN RM identifies the second register operand.
+IF MOD == memory mode THEN RM indicates how the effective address of the memory operand
+should be calculated.
+
+## MOD == 11 (register-to-register mode)
+
+  R/M | W=0 | W=1
+- 000 | AL  | AX
+- 001 | CL  | CX
+- 010 | DL  | DX
+- 011 | BL  | BX
+- 100 | AH  | SP
+- 101 | CH  | BP
+- 110 | DH  | SI
+- 111 | BH  | DI
+
+## MOD == memory mode
+
+  R/M | MOD==00        |    MOD==01   |   MOD==10 
+- 000 | BX + SI        | BX + SI + D8 | BX + SI + D16
+- 001 | BX + DI        | BX + DI + D8 | BX + DI + D16
+- 010 | BP + SI        | BP + SI + D8 | BP + SI + D16
+- 011 | BP + DI        | BP + DI + D8 | BP + DI + D16
+- 100 | SI             | SI + D8      | SI + D16
+- 101 | DI             | DI + D8      | DI + D16
+- 110 | DIRECT_ADDRESS | BP + D8      | BP + D16
+- 111 | BX             | BX + D8      | BX + D16
+
+
+# Displacement
+
+There may be 1 or 2 displacement bytes. The MOD field indicates how many displacement
+bytes are present. 
+
+- IF the displacement is 2 bytes THEN most-significant byte is stored second in the instruction. 
+- IF the displacement is 1 byte THEN 8086/8088 automatically sign-extends to 16-bit.
+
+# SR 
+
+Segment Register:
+
+- 00: ES
+- 01: CS
+- 10: SS
+- 11: DS

@@ -348,6 +348,8 @@ type Instruction struct {
 func (i Instruction) String() string {
 	// TODO: do this better
 	switch i.Name {
+	case "XLAT", "LAHF", "SAHF", "PUSHF", "POPF":
+		return i.Name
 	case "PUSH", "POP", "INC", "DEC":
 		return fmt.Sprintf("%s %s", i.Name, i.Operand1)
 	}
@@ -391,6 +393,13 @@ func (o Operand) String() string {
 		sb.WriteString(formatReg(o.Reg1))
 	}
 	return sb.String()
+}
+
+func twosComplement(d uint16) int16 {
+	if (d>>7)&1 == 1 {
+		return int16(-d + 1)
+	}
+	return int16(d)
 }
 
 type size string
