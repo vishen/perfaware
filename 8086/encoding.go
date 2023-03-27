@@ -17,27 +17,17 @@ var (
 )
 
 var sizes = map[string]int{
-	"D":      1,
-	"W":      1,
-	"S":      1,
-	"MOD":    2,
-	"SR":     2,
-	"REG":    3,
-	"REGSRC": 3,
-	"REGDST": 3,
-	"RM":     3,
-	"RMSRC":  3,
-	"DISP":   8,
-	"DATA":   8,
-	"DATAW":  8,
-	"ADDRLO": 8,
-	"ADDRHI": 8,
-
-	// TODO: These sizes should be zero, but the parser doesn't currently handle it
-	"ACCDST": 8,
-	"ACCSRC": 8,
-	"ACC":    8,
-	"DX":     8,
+	"D":     1,
+	"W":     1,
+	"S":     1,
+	"MOD":   2,
+	"SR":    2,
+	"REG":   3,
+	"RM":    3,
+	"DISP":  8,
+	"DATA":  8,
+	"DATAW": 8,
+	"ADDR":  8,
 }
 
 func sizeOf(val string) int {
@@ -62,6 +52,14 @@ func isConst(val string) bool {
 	return false
 }
 
+func isLikelyType(val string) bool {
+	switch val[0] {
+	case '0', '1':
+		return false
+	}
+	return true
+}
+
 type Encoder struct {
 	rawEncoding string
 
@@ -72,6 +70,7 @@ type Encoding struct {
 	Orig string
 
 	Name   string
+	Type   string
 	Opcode Opcode
 
 	Bytes [][]Part
@@ -108,7 +107,12 @@ func NewEncoder(instructionEncodings string) Encoder {
 
 		encoding := strings.Split(encoding, " ")
 		enc.Name = encoding[0]
-		for _, part := range encoding[1:] {
+		start := 1
+		if isLikelyType(encoding[1]) {
+			enc.Type = encoding[1]
+			start = 2
+		}
+		for _, part := range encoding[start:] {
 			if len(part) == 0 {
 				continue
 			}

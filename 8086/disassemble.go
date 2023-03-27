@@ -26,6 +26,7 @@ func disassemble(data []byte) []Instruction {
 				continue
 			}
 			found = true
+			// fmt.Printf("%#v\n", in)
 			fmt.Println(in)
 		}
 		if !found {
@@ -69,37 +70,14 @@ func (d *disassembler) imm8() uint16 {
 	return uint16(d.next())
 }
 
+// signed 8-bit immediate
+func (d *disassembler) signedImm8() int8 {
+	return int8(d.next())
+}
+
 // read full 16-bit immediate
 func (d *disassembler) imm16() uint16 {
 	return d.imm8() | (d.imm8() << 8)
-}
-
-func (d *disassembler) handleModRM(mod, rm, w byte) Operand {
-	var o Operand
-	switch mod {
-	case 0b00: // Memory mode, no displacement *
-		o.Ptr = true
-		if rm == 0b110 { // * special case
-			o.Imm = d.imm16()
-		} else {
-			ea := effectiveAddr[rm]
-			o.Reg1, o.Reg2 = ea[0], ea[1]
-			o.Ptr = true
-		}
-	case 0b01: // Memory mode, 8-bit displacement
-		ea := effectiveAddr[rm]
-		o.Reg1, o.Reg2 = ea[0], ea[1]
-		o.Imm = d.imm8()
-		o.Ptr = true
-	case 0b10: // Memory mode, 16-bit displacement
-		ea := effectiveAddr[rm]
-		o.Reg1, o.Reg2 = ea[0], ea[1]
-		o.Imm = d.imm16()
-		o.Ptr = true
-	case 0b11: // Register mode (no displacement)
-		o.Reg1 = register(rm, w)
-	}
-	return o
 }
 
 func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
@@ -110,41 +88,14 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 
 	in := Instruction{
 		Name:   enc.Name,
+		Type:   enc.Type,
 		Opcode: enc.Opcode.Opcode,
+		W:      1,
 	}
 
-	setOperand1 := false
-	set := func(o Operand) {
-		if !setOperand1 {
-			in.Operand1 = o
-			setOperand1 = true
-		}
-		in.Operand2 = o
-	}
-
-	seen := map[string]struct{}{}
-	has := func(name string) bool {
-		_, ok := seen[name]
-		return ok
-	}
-	w := func() byte {
-		if has("W") {
-			return in.W
-		}
-		return 1
-	}
 	for _, b := range enc.Bytes {
 		for _, p := range b {
-			seen[p.Name] = struct{}{}
 			switch pname := p.Name; pname {
-			case "DX":
-				set(Operand{Reg1: DX})
-			case "ACC":
-				set(Operand{Reg1: register(0b000, w())})
-			case "ACCDST":
-				in.Operand1.Reg1 = register(0b000, w())
-			case "ACCSRC":
-				in.Operand2.Reg1 = register(0b000, w())
 			case "S":
 				in.S = d.read(p.Len)
 			case "D":
@@ -155,48 +106,42 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				in.Mod = d.read(p.Len)
 			case "REG":
 				in.Reg = d.read(p.Len)
-				set(Operand{Reg1: register(in.Reg, w())})
-			case "REGDST":
-				in.Reg = d.read(p.Len)
-				in.Operand1.Reg1 = register(in.Reg, w())
-			case "REGSRC":
-				in.Reg = d.read(p.Len)
-				in.Operand2.Reg1 = register(in.Reg, w())
 			case "RM":
 				in.RM = d.read(p.Len)
-				if has("REG") {
-					in.Operand1, in.Operand2 = in.Operand2, in.Operand1
+				switch in.Mod {
+				case 0b00: // Memory mode, no displacement *
+					if in.RM == 0b110 { // * special case
+						in.Displacement16 = int16(d.imm16())
+					}
+				case 0b01: // Memory mode, 8-bit displacement
+					// If the displacement it 1 byte, then if needs to be sign-extended to 16-bit.
+					in.Displacement8 = d.signedImm8()
+				case 0b10: // Memory mode, 16-bit displacement
+					in.Displacement16 = int16(d.imm16())
 				}
-			case "RMSRC":
-				in.RM = d.read(p.Len)
 			case "SR":
-				switch d.read(p.Len) {
-				case 0b00:
-					set(Operand{Reg1: ES})
-				case 0b01:
-					set(Operand{Reg1: CS})
-				case 0b10:
-					set(Operand{Reg1: SS})
-				case 0b011:
-					set(Operand{Reg1: DS})
-				}
+				in.SR = d.read(p.Len)
 			case "DATAW":
 				if in.W > 0 && in.S == 0 {
-					set(Operand{Imm: d.imm16()})
+					in.Data = d.imm16()
 				} else {
-					set(Operand{Imm: d.imm8()})
+					in.Data = d.imm8()
 				}
 			case "DATA":
-				set(Operand{Imm: d.imm8()})
-			case "ADDRLO", "ADDRHI":
-				if has("ACCDST") {
-					in.Operand2.Ptr = true
-				} else if has("ACCSRC") {
-					in.Operand1.Ptr = true
+				in.Data = d.imm8()
+			case "ADDR":
+				if in.W > 0 {
+					in.Data = d.imm16()
+				} else {
+					in.Data = d.imm8()
 				}
 			case "DISP":
 				// Ignore
 			default:
+				if !p.IsConst {
+					panic("p is not a constant")
+				}
+
 				// Constant
 				c := d.read(p.Len)
 
@@ -211,200 +156,214 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 			}
 		}
 	}
-	if has("MOD") {
-		if has("RMSRC") {
-			in.Operand2 = d.handleModRM(in.Mod, in.RM, in.W)
-		} else {
-			in.Operand1 = d.handleModRM(in.Mod, in.RM, in.W)
-		}
-	}
-	if has("ADDRLO") {
-		if in.W > 0 {
-			if has("ACCDST") {
-				in.Operand2.Imm = d.imm16()
-			} else {
-				in.Operand1.Imm = d.imm16()
-			}
-		} else {
-			if has("ACCDST") {
-				in.Operand2.Imm = d.imm8()
-			} else {
-				in.Operand1.Imm = d.imm8()
-			}
-		}
-	}
-	if in.D > 0 {
-		in.Operand1, in.Operand2 = in.Operand2, in.Operand1
-	}
 	return in, true
 }
 
-var effectiveAddr = map[byte][2]Reg{
-	0b000: [2]Reg{BX, SI},
-	0b001: [2]Reg{BX, DI},
-	0b010: [2]Reg{BP, SI},
-	0b011: [2]Reg{BP, DI},
-	0b100: [2]Reg{SI, NoReg},
-	0b101: [2]Reg{DI, NoReg},
-	0b110: [2]Reg{BP, NoReg},
-	0b111: [2]Reg{BX, NoReg},
-}
-
-func register(r byte, w byte) Reg {
-	return Reg((w << 4) | (1 << 3) | r)
-}
-
-type Reg byte
-
-const (
-	NoReg Reg = 0b000
-
-	ES Reg = 0b1
-	CS Reg = 0b10
-	SS Reg = 0b11
-	DS Reg = 0b100
-
-	// W = 0
-	AL Reg = 0b1000
-	CL Reg = 0b1001
-	DL Reg = 0b1010
-	BL Reg = 0b1011
-	AH Reg = 0b1100
-	CH Reg = 0b1101
-	DH Reg = 0b1110
-	BH Reg = 0b1111
-
-	// W = 1
-	AX Reg = 0b11000
-	CX Reg = 0b11001
-	DX Reg = 0b11010
-	BX Reg = 0b11011
-	SP Reg = 0b11100
-	BP Reg = 0b11101
-	SI Reg = 0b11110
-	DI Reg = 0b11111
-)
-
-func formatReg(r Reg) string {
-	switch r {
-	case AL:
-		return "al"
-	case CL:
-		return "cl"
-	case DL:
-		return "dl"
-	case BL:
-		return "bl"
-	case AH:
-		return "ah"
-	case CH:
-		return "ch"
-	case DH:
-		return "dh"
-	case BH:
-		return "bh"
-	case AX:
-		return "ax"
-	case CX:
-		return "cx"
-	case DX:
-		return "dx"
-	case BX:
-		return "bx"
-	case SP:
-		return "sp"
-	case BP:
-		return "bp"
-	case SI:
-		return "si"
-	case DI:
-		return "di"
-	case ES:
-		return "es"
-	case CS:
-		return "cs"
-	case SS:
-		return "ss"
-	case DS:
-		return "ds"
-	}
-	return "INVALID REG"
-}
-
 type Instruction struct {
-	Name   string
-	Opcode byte
-	D      byte
-	W      byte
-	S      byte
-	Mod    byte
-	Reg    byte
-	RM     byte
-
-	Operand1 Operand
-	Operand2 Operand
-}
-
-func (i Instruction) String() string {
-	// TODO: do this better
-	switch i.Name {
-	case "XLAT", "LAHF", "SAHF", "PUSHF", "POPF":
-		return i.Name
-	case "PUSH", "POP", "INC", "DEC":
-		return fmt.Sprintf("%s %s", i.Name, i.Operand1)
-	}
-	return fmt.Sprintf("%s %s, %s", i.Name, i.Operand1, i.Operand2)
+	Name           string
+	Type           string
+	Opcode         byte
+	D              byte
+	W              byte
+	S              byte
+	Mod            byte
+	Reg            byte
+	RM             byte
+	SR             byte
+	Data           uint16
+	Displacement8  int8
+	Displacement16 int16
 }
 
 type Operand struct {
-	Reg1 Reg
-	Reg2 Reg
-	Imm  uint16
-	Size size
-	Ptr  bool
+	Reg1         string
+	Reg2         string
+	SR           uint16
+	Imm          uint16
+	Displacement int16
+	Ptr          bool
 }
 
-func (o Operand) String() string {
+func (i Instruction) Operands() []Operand {
+	var ops []Operand
+	for _, typ := range strings.Split(i.Type, "__") {
+		switch typ {
+		case "REG":
+			ops = append(ops, i.operandReg())
+		case "RM":
+			ops = append(ops, i.operandRM())
+		case "IMM", "DATA":
+			ops = append(ops, Operand{Imm: i.Data})
+		case "MEM":
+			ops = append(ops, Operand{Imm: i.Data, Ptr: true})
+		case "ACC":
+			ops = append(ops, i.operandAcc())
+		case "DX":
+			ops = append(ops, Operand{Reg1: "dx"})
+		case "":
+			// Do nothing
+		default:
+			panic(fmt.Sprintf("type %s not implemented", typ))
+		}
+	}
+	if i.D > 0 {
+		ops[0], ops[1] = ops[1], ops[0]
+	}
+	return ops
+}
+
+func (i Instruction) operandReg() Operand {
+	return Operand{Reg1: formatReg(i.Reg, i.W)}
+}
+
+func (i Instruction) operandRM() Operand {
+	r1, r2, disp, ptr := formatRM(i.Mod, i.RM, i.W, i.Displacement8, i.Displacement16)
+	return Operand{
+		Reg1:         r1,
+		Reg2:         r2,
+		Displacement: disp,
+		Ptr:          ptr,
+	}
+}
+
+func (i Instruction) operandAcc() Operand {
+	if i.W > 0 {
+		return Operand{Reg1: "ax"}
+	}
+	return Operand{Reg1: "al"}
+}
+
+func (i Instruction) String() string {
 	var sb strings.Builder
-	if o.Ptr {
-		sb.WriteString("[")
-		written := false
-		if o.Reg1 != NoReg {
-			written = true
-			sb.WriteString(formatReg(o.Reg1))
+
+	sb.WriteString(i.Name)
+
+	wasPtr := false
+	ops := i.Operands()
+	for oi, o := range ops {
+		if len(ops) == 1 && o.Displacement > 0 {
+			if i.W > 0 {
+				sb.WriteString(" word")
+			} else {
+				sb.WriteString(" byte")
+			}
 		}
-		if o.Reg2 != NoReg {
-			written = true
-			sb.WriteString(fmt.Sprintf(" + %s", formatReg(o.Reg2)))
+		if oi > 0 {
+			sb.WriteString(",")
 		}
-		if o.Imm > 0 {
-			if written {
+		sb.WriteString(" ")
+		if o.Ptr {
+			sb.WriteString("[")
+			wasPtr = true
+		}
+		if o.Reg1 != "" {
+			sb.WriteString(o.Reg1)
+		}
+		if o.Reg2 != "" {
+			sb.WriteString(" + ")
+			sb.WriteString(o.Reg2)
+		}
+		if o.Displacement > 0 {
+			if o.Reg1 != "" {
 				sb.WriteString(" + ")
+			}
+			sb.WriteString(fmt.Sprintf("%d", o.Displacement))
+		} else if o.Displacement < 0 {
+			if o.Reg1 != "" {
+				sb.WriteString(" - ")
+			}
+			sb.WriteString(fmt.Sprintf("%d", -o.Displacement))
+		}
+
+		if o.Imm > 0 {
+			if wasPtr && !o.Ptr {
+				if i.W > 0 {
+					sb.WriteString("word ")
+				} else {
+					sb.WriteString("byte ")
+				}
 			}
 			sb.WriteString(fmt.Sprintf("%d", o.Imm))
 		}
-		sb.WriteString(fmt.Sprintf("]"))
-	} else if o.Imm > 0 {
-		if o.Size != "" {
-			sb.WriteString(fmt.Sprintf("%s ", o.Size))
+
+		if o.Ptr {
+			sb.WriteString("]")
 		}
-		sb.WriteString(fmt.Sprintf("%d", o.Imm))
-	} else {
-		sb.WriteString(formatReg(o.Reg1))
 	}
 	return sb.String()
 }
 
-func twosComplement(d uint16) int16 {
-	if (d>>7)&1 == 1 {
-		return int16(-d + 1)
+func formatRM(mod, rm, w byte, disp8 int8, disp16 int16) (string, string, int16, bool) {
+	if mod == 0b11 {
+		return formatReg(rm, w), "", 0, false
 	}
-	return int16(d)
+	if mod == 0b00 && rm == 0b110 {
+		return "", "", disp16, true
+	}
+
+	var (
+		r1   string
+		r2   string
+		disp int16
+	)
+
+	switch rm {
+	case 0b000:
+		r1 = "bx"
+		r2 = "si"
+	case 0b001:
+		r1 = "bx"
+		r2 = "di"
+	case 0b010:
+		r1 = "bp"
+		r2 = "si"
+	case 0b011:
+		r1 = "bp"
+		r2 = "di"
+	case 0b100:
+		r1 = "si"
+	case 0b101:
+		r1 = "di"
+	case 0b110:
+		r1 = "bp"
+	case 0b111:
+		r1 = "bx"
+	}
+
+	switch mod {
+	case 0b01:
+		disp = int16(disp8)
+	case 0b10:
+		disp = disp16
+	}
+
+	return r1, r2, disp, true
 }
 
-type size string
-
-const (
-	sizeByte = "byte"
-	sizeWord = "word"
-)
+func formatReg(r, w byte) string {
+	format := func(r, rw string) string {
+		if w == 0 {
+			return r
+		}
+		return rw
+	}
+	switch r {
+	case 0b000:
+		return format("al", "ax")
+	case 0b001:
+		return format("cl", "cx")
+	case 0b010:
+		return format("dl", "dx")
+	case 0b011:
+		return format("bl", "bx")
+	case 0b100:
+		return format("ah", "sp")
+	case 0b101:
+		return format("ch", "bp")
+	case 0b110:
+		return format("dh", "si")
+	case 0b111:
+		return format("bh", "di")
+	}
+	return ""
+}
