@@ -7,12 +7,9 @@ import (
 )
 
 func disassemble(data []byte) []Instruction {
-	for _, d := range data {
-		fmt.Printf("%08b\n", d)
-	}
-
 	d := &disassembler{data: data}
 	for d.di < len(data) {
+		start := d.di
 		b := d.next()
 		encs := encoder.Decode(b)
 		if len(encs) == 0 {
@@ -26,8 +23,15 @@ func disassemble(data []byte) []Instruction {
 				continue
 			}
 			found = true
-			// fmt.Printf("%#v\n", in)
-			fmt.Println(in)
+			fmt.Print(in)
+			if *debugFlag {
+				fmt.Printf(" (")
+				for i := start; i < d.di; i++ {
+					fmt.Printf(" %08b", data[i])
+				}
+				fmt.Printf(" )")
+			}
+			fmt.Println()
 		}
 		if !found {
 			log.Fatalf("unable to find instruction encoding for %08b at index %d", b, d.di-1)
@@ -178,13 +182,16 @@ type Instruction struct {
 type Operand struct {
 	Reg1         string
 	Reg2         string
-	SR           uint16
+	SR           string
 	Imm          uint16
 	Displacement int16
 	Ptr          bool
 }
 
 func (i Instruction) Operands() []Operand {
+	if *debugFlag {
+		fmt.Printf("inst=%#v\n", i)
+	}
 	var ops []Operand
 	for _, typ := range strings.Split(i.Type, "__") {
 		switch typ {
@@ -200,6 +207,17 @@ func (i Instruction) Operands() []Operand {
 			ops = append(ops, i.operandAcc())
 		case "DX":
 			ops = append(ops, Operand{Reg1: "dx"})
+		case "SR":
+			sr := "es"
+			switch i.SR {
+			case 0b01:
+				sr = "cs"
+			case 0b10:
+				sr = "ss"
+			case 0b11:
+				sr = "ds"
+			}
+			ops = append(ops, Operand{SR: sr})
 		case "":
 			// Do nothing
 		default:
@@ -241,7 +259,7 @@ func (i Instruction) String() string {
 	wasPtr := false
 	ops := i.Operands()
 	for oi, o := range ops {
-		if len(ops) == 1 && o.Displacement > 0 {
+		if len(ops) == 1 && o.Ptr {
 			if i.W > 0 {
 				sb.WriteString(" word")
 			} else {
@@ -255,6 +273,9 @@ func (i Instruction) String() string {
 		if o.Ptr {
 			sb.WriteString("[")
 			wasPtr = true
+		}
+		if o.SR != "" {
+			sb.WriteString(o.SR)
 		}
 		if o.Reg1 != "" {
 			sb.WriteString(o.Reg1)
