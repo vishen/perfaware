@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strings"
 )
 
+/*
 func disassemble(data []byte) []Instruction {
 	d := &disassembler{data: data}
 	for d.di < len(data) {
@@ -40,6 +40,7 @@ func disassemble(data []byte) []Instruction {
 
 	return nil
 }
+*/
 
 type disassembler struct {
 	data []byte
@@ -47,6 +48,21 @@ type disassembler struct {
 
 	curByte byte
 	cbi     int
+}
+
+func (d *disassembler) nextInstruction() Instruction {
+	b := d.next()
+	encs := encoder.Decode(b)
+	if len(encs) == 0 {
+		panic(fmt.Sprintf("unable to decode %08b at pos %d", b, d.di))
+	}
+
+	for _, enc := range encs {
+		if in, ok := d.parse(enc); ok {
+			return in
+		}
+	}
+	panic(fmt.Sprintf("unable to find instruction encoding for %08b at index %d", b, d.di-1))
 }
 
 // read a portion of the current byte

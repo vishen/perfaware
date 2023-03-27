@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 )
@@ -22,7 +23,20 @@ func main1() int {
 	if err != nil {
 		log.Fatal(err)
 	}
-	disassemble(data)
+	d := &disassembler{data: data}
+	for d.di < len(data) {
+		start := d.di
+		in := d.nextInstruction()
+		fmt.Print(in)
+		if *debugFlag {
+			fmt.Printf(" (")
+			for i := start; i < d.di; i++ {
+				fmt.Printf(" %08b", data[i])
+			}
+			fmt.Printf(" )")
+		}
+		fmt.Println()
+	}
 
 	return 0
 }
