@@ -23,6 +23,7 @@ func main1() int {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	d := &disassembler{data: data}
 	for d.di < len(data) {
 		start := d.di

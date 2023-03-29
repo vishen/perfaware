@@ -91,3 +91,10 @@ Segment Register:
 - 01: CS
 - 10: SS
 - 11: DS
+
+# Others
+
+- IP-{LO,HI}: New IP (instruction pointer) value
+- CS-{LO,HI}: New CS value
+- IP-INC8: 8-bit signed increment to instruction pointer
+- IP-INC: 16-bit signed increment to instruction pointer

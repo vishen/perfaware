@@ -56,13 +56,11 @@ pop ds
 
 xchg ax, [bp - 1000]
 xchg [bx + 50], bp
-
 xchg ax, ax
 xchg ax, dx
 xchg ax, sp
 xchg ax, si
 xchg ax, di
-
 xchg cx, dx
 xchg si, cx
 xchg cl, ah
@@ -319,3 +317,60 @@ rep scasw
 rep lodsw
 rep stosb
 rep stosw
+
+call [39201]
+call [bp - 100]
+call sp
+call ax
+
+jmp ax
+jmp di
+jmp [12]
+jmp [4395]
+
+ret -7
+ret 500
+ret
+
+; Leaving off since I don't know how to make the test pass with this
+; without properly implementing jumps and labels which is a pain.
+; label:
+; je label
+; jl label
+; jle label
+; jb label
+; jbe label
+; jp label
+; jo label
+; js label
+; jne label
+; jnl label
+; jg label
+; jnb label
+; ja label
+; jnp label
+; jno label
+; jns label
+; loop label
+; loopz label
+; loopnz label
+; jcxz label
+
+int 13
+int3
+
+into
+iret
+
+clc
+cmc
+stc
+cld
+std
+cli
+sti
+hlt
+wait
+
+lock not byte [bp + 9905]
+lock xchg [100], al

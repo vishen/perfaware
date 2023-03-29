@@ -35,6 +35,9 @@ func (d *disassembler) nextInstruction() Instruction {
 	if in.Repeat {
 		in = d.nextInstruction()
 		in.Repeat = true
+	} else if in.Lock {
+		in = d.nextInstruction()
+		in.Lock = true
 	}
 	return in
 }
@@ -87,6 +90,13 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 		W:      1,
 	}
 
+	switch enc.Type {
+	case "REPEAT":
+		in.Repeat = true
+	case "LOCK":
+		in.Lock = true
+	}
+
 	for _, b := range enc.Bytes {
 		for _, p := range b {
 			switch pname := p.Name; pname {
@@ -135,8 +145,6 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				}
 			case "DISP":
 				// Ignore
-			case "REPEAT":
-				in.Repeat = true
 			default:
 				if !p.IsConst {
 					panic("p is not a constant")
@@ -176,6 +184,7 @@ type Instruction struct {
 	Displacement8  int8
 	Displacement16 int16
 	Repeat         bool
+	Lock           bool
 }
 
 type Operand struct {
@@ -189,9 +198,6 @@ type Operand struct {
 }
 
 func (i Instruction) Operands() []Operand {
-	if *debugFlag {
-		fmt.Printf("inst=%#v\n", i)
-	}
 	var ops []Operand
 	for _, typ := range strings.Split(i.Type, "__") {
 		switch typ {
@@ -233,6 +239,12 @@ func (i Instruction) Operands() []Operand {
 	if i.D > 0 {
 		ops[0], ops[1] = ops[1], ops[0]
 	}
+	if *debugFlag {
+		fmt.Printf("inst=%#v\n", i)
+		for _, o := range ops {
+			fmt.Printf("> op1: %#v\n", o)
+		}
+	}
 	return ops
 }
 
@@ -262,6 +274,9 @@ func (i Instruction) String() string {
 
 	if i.Repeat {
 		sb.WriteString("rep ")
+	}
+	if i.Lock {
+		sb.WriteString("lock ")
 	}
 
 	sb.WriteString(i.Name)
@@ -307,9 +322,12 @@ func (i Instruction) String() string {
 			sb.WriteString(fmt.Sprintf("%d", o.Displacement))
 		} else if o.Displacement < 0 {
 			if o.Reg1 != "" {
-				sb.WriteString(" - ")
+				sb.WriteString(fmt.Sprintf(" - %d", -o.Displacement))
+			} else {
+				// TODO: Don't know if this is correct, but don't think a displacement on its own can
+				// ever be negative?
+				sb.WriteString(fmt.Sprintf("%d", uint16(o.Displacement)))
 			}
-			sb.WriteString(fmt.Sprintf("%d", -o.Displacement))
 		}
 
 		if o.Imm > 0 {
