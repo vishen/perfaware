@@ -17,17 +17,20 @@ var (
 )
 
 var sizes = map[string]int{
-	"D":     1,
-	"W":     1,
-	"S":     1,
-	"MOD":   2,
-	"SR":    2,
-	"REG":   3,
-	"RM":    3,
-	"DISP":  8,
-	"DATA":  8,
-	"DATAW": 8,
-	"ADDR":  8,
+	"D":      1,
+	"W":      1,
+	"S":      1,
+	"V":      1,
+	"Z":      1,
+	"MOD":    2,
+	"SR":     2,
+	"REG":    3,
+	"RM":     3,
+	"DISP":   8,
+	"DATA":   8,
+	"DATAW":  8,
+	"ADDR":   8,
+	"REPEAT": 8,
 }
 
 func sizeOf(val string) int {
@@ -42,6 +45,9 @@ func nameOf(val string) string {
 	if _, ok := sizes[val]; ok {
 		return val
 	}
+	if !isNum(val) {
+		panic(fmt.Sprintf("%q is not a constant", val))
+	}
 	return "const_" + val
 }
 
@@ -53,11 +59,15 @@ func isConst(val string) bool {
 }
 
 func isLikelyType(val string) bool {
+	return !isNum(val)
+}
+
+func isNum(val string) bool {
 	switch val[0] {
 	case '0', '1':
-		return false
+		return true
 	}
-	return true
+	return false
 }
 
 type Encoder struct {

@@ -1,12 +1,13 @@
 bits 16
 
-; sub sp, 392
-; sub si, 5
-; sub ah, 30
-;xchg [bx + 50], bp
-;xchg [bx - 1000], bp
-xchg [bp - 1000], ax
-xchg ax, [bp - 1000]
-;xchg cx, dx
-;xchg si, cx
-;xchg cl, ah
+; shl ah, 1
+;shl ah, 5
+; shl ah, cl
+; test bx, cx
+; test bl, 20
+; xor al, 93
+; xor bx, 93
+; xor byte [bp - 39], 239
+; xor [bx + di + 1000], dx
+; xor byte [bp - 39], 239
+rep movsb

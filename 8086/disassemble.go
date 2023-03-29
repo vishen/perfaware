@@ -5,43 +5,6 @@ import (
 	"strings"
 )
 
-/*
-func disassemble(data []byte) []Instruction {
-	d := &disassembler{data: data}
-	for d.di < len(data) {
-		start := d.di
-		b := d.next()
-		encs := encoder.Decode(b)
-		if len(encs) == 0 {
-			log.Fatalf("unable to decode %08b at pos %d", b, d.di)
-		}
-
-		found := false
-		for _, enc := range encs {
-			in, ok := d.parse(enc)
-			if !ok {
-				continue
-			}
-			found = true
-			fmt.Print(in)
-			if *debugFlag {
-				fmt.Printf(" (")
-				for i := start; i < d.di; i++ {
-					fmt.Printf(" %08b", data[i])
-				}
-				fmt.Printf(" )")
-			}
-			fmt.Println()
-		}
-		if !found {
-			log.Fatalf("unable to find instruction encoding for %08b at index %d", b, d.di-1)
-		}
-	}
-
-	return nil
-}
-*/
-
 type disassembler struct {
 	data []byte
 	di   int
@@ -57,12 +20,23 @@ func (d *disassembler) nextInstruction() Instruction {
 		panic(fmt.Sprintf("unable to decode %08b at pos %d", b, d.di))
 	}
 
+	var (
+		in Instruction
+		ok bool
+	)
 	for _, enc := range encs {
-		if in, ok := d.parse(enc); ok {
-			return in
+		if in, ok = d.parse(enc); ok {
+			break
 		}
 	}
-	panic(fmt.Sprintf("unable to find instruction encoding for %08b at index %d", b, d.di-1))
+	if !ok {
+		panic(fmt.Sprintf("unable to find instruction encoding for %08b at index %d", b, d.di-1))
+	}
+	if in.Repeat {
+		in = d.nextInstruction()
+		in.Repeat = true
+	}
+	return in
 }
 
 // read a portion of the current byte
@@ -122,6 +96,10 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				in.D = d.read(p.Len)
 			case "W":
 				in.W = d.read(p.Len)
+			case "V":
+				in.V = d.read(p.Len)
+			case "Z":
+				in.Z = d.read(p.Len)
 			case "MOD":
 				in.Mod = d.read(p.Len)
 			case "REG":
@@ -157,6 +135,8 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				}
 			case "DISP":
 				// Ignore
+			case "REPEAT":
+				in.Repeat = true
 			default:
 				if !p.IsConst {
 					panic("p is not a constant")
@@ -186,6 +166,8 @@ type Instruction struct {
 	D              byte
 	W              byte
 	S              byte
+	V              byte
+	Z              byte
 	Mod            byte
 	Reg            byte
 	RM             byte
@@ -193,6 +175,7 @@ type Instruction struct {
 	Data           uint16
 	Displacement8  int8
 	Displacement16 int16
+	Repeat         bool
 }
 
 type Operand struct {
@@ -202,6 +185,7 @@ type Operand struct {
 	Imm          uint16
 	Displacement int16
 	Ptr          bool
+	UnknownSize  bool
 }
 
 func (i Instruction) Operands() []Operand {
@@ -234,6 +218,12 @@ func (i Instruction) Operands() []Operand {
 				sr = "ds"
 			}
 			ops = append(ops, Operand{SR: sr})
+		case "V":
+			if i.V == 0 {
+				ops = append(ops, Operand{Imm: 1, UnknownSize: true})
+			} else {
+				ops = append(ops, Operand{Reg1: "cl", UnknownSize: true})
+			}
 		case "":
 			// Do nothing
 		default:
@@ -270,25 +260,35 @@ func (i Instruction) operandAcc() Operand {
 func (i Instruction) String() string {
 	var sb strings.Builder
 
+	if i.Repeat {
+		sb.WriteString("rep ")
+	}
+
 	sb.WriteString(i.Name)
 
-	wasPtr := false
 	ops := i.Operands()
-	for oi, o := range ops {
-		if len(ops) == 1 && o.Ptr {
-			if i.W > 0 {
-				sb.WriteString(" word")
-			} else {
-				sb.WriteString(" byte")
-			}
+
+	knownSize := false
+	for _, o := range ops {
+		if !o.Ptr && o.Reg1 != "" && !o.UnknownSize {
+			knownSize = true
 		}
+	}
+
+	for oi, o := range ops {
 		if oi > 0 {
 			sb.WriteString(",")
 		}
 		sb.WriteString(" ")
 		if o.Ptr {
+			if !knownSize {
+				if i.W > 0 {
+					sb.WriteString("word ")
+				} else {
+					sb.WriteString("byte ")
+				}
+			}
 			sb.WriteString("[")
-			wasPtr = true
 		}
 		if o.SR != "" {
 			sb.WriteString(o.SR)
@@ -313,13 +313,6 @@ func (i Instruction) String() string {
 		}
 
 		if o.Imm > 0 {
-			if wasPtr && !o.Ptr {
-				if i.W > 0 {
-					sb.WriteString("word ")
-				} else {
-					sb.WriteString("byte ")
-				}
-			}
 			sb.WriteString(fmt.Sprintf("%d", o.Imm))
 		}
 
