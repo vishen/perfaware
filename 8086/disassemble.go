@@ -15,31 +15,48 @@ type disassembler struct {
 
 func (d *disassembler) nextInstruction() Instruction {
 	b := d.next()
+
+	var flags InstructionFlags
+
+	// Look for any prefix instructions
+	found := true
+	for found {
+		switch b {
+		case 0b11110010:
+			flags |= FlagRepeat
+		case 0b11110011:
+			flags |= FlagRepeatZ
+		case 0b00100110:
+			flags |= FlagESOverride
+		case 0b00101110:
+			flags |= FlagCSOverride
+		case 0b00110110:
+			flags |= FlagSSOverride
+		case 0b00111110:
+			flags |= FlagDSOverride
+		case 0b11110000:
+			flags |= FlagLock
+		default:
+			found = false
+		}
+		if !found {
+			break
+		}
+		b = d.next()
+	}
+
 	encs := encoder.Decode(b)
 	if len(encs) == 0 {
 		panic(fmt.Sprintf("unable to decode %08b at pos %d", b, d.di))
 	}
 
-	var (
-		in Instruction
-		ok bool
-	)
 	for _, enc := range encs {
-		if in, ok = d.parse(enc); ok {
-			break
+		if in, ok := d.parse(enc); ok {
+			in.Flags = flags
+			return in
 		}
 	}
-	if !ok {
-		panic(fmt.Sprintf("unable to find instruction encoding for %08b at index %d", b, d.di-1))
-	}
-	if in.Repeat {
-		in = d.nextInstruction()
-		in.Repeat = true
-	} else if in.Lock {
-		in = d.nextInstruction()
-		in.Lock = true
-	}
-	return in
+	panic(fmt.Sprintf("unable to find instruction encoding for %08b at index %d", b, d.di-1))
 }
 
 // read a portion of the current byte
@@ -88,13 +105,6 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 		Type:   enc.Type,
 		Opcode: enc.Opcode.Opcode,
 		W:      1,
-	}
-
-	switch enc.Type {
-	case "REPEAT":
-		in.Repeat = true
-	case "LOCK":
-		in.Lock = true
 	}
 
 	for _, b := range enc.Bytes {
@@ -167,6 +177,18 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 	return in, true
 }
 
+type InstructionFlags int
+
+const (
+	FlagRepeat InstructionFlags = 1 << iota
+	FlagRepeatZ
+	FlagLock
+	FlagESOverride
+	FlagCSOverride
+	FlagSSOverride
+	FlagDSOverride
+)
+
 type Instruction struct {
 	Name           string
 	Type           string
@@ -183,8 +205,11 @@ type Instruction struct {
 	Data           uint16
 	Displacement8  int8
 	Displacement16 int16
-	Repeat         bool
-	Lock           bool
+	Flags          InstructionFlags
+}
+
+func (i Instruction) FlagSet(f InstructionFlags) bool {
+	return i.Flags&f == f
 }
 
 type Operand struct {
@@ -272,10 +297,10 @@ func (i Instruction) operandAcc() Operand {
 func (i Instruction) String() string {
 	var sb strings.Builder
 
-	if i.Repeat {
+	if i.FlagSet(FlagRepeat) || i.FlagSet(FlagRepeatZ) {
 		sb.WriteString("rep ")
 	}
-	if i.Lock {
+	if i.FlagSet(FlagLock) {
 		sb.WriteString("lock ")
 	}
 
@@ -302,6 +327,16 @@ func (i Instruction) String() string {
 				} else {
 					sb.WriteString("byte ")
 				}
+			}
+			switch {
+			case i.FlagSet(FlagESOverride):
+				sb.WriteString("es:")
+			case i.FlagSet(FlagCSOverride):
+				sb.WriteString("cs:")
+			case i.FlagSet(FlagSSOverride):
+				sb.WriteString("ss:")
+			case i.FlagSet(FlagDSOverride):
+				sb.WriteString("ds:")
 			}
 			sb.WriteString("[")
 		}
