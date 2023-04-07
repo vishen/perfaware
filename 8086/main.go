@@ -20,12 +20,6 @@ func main() {
 func main1() int {
 	flag.Parse()
 
-	/*
-		fmt.Printf("0x%x\n", (0x7788&0xff00)>>8)
-		fmt.Printf("0x%x\n", (0x6655&0xff00)|0x77)
-		return 0
-	*/
-
 	data, err := os.ReadFile(*inputFileFlag)
 	if err != nil {
 		log.Fatal(err)
@@ -42,7 +36,7 @@ func main1() int {
 		// Simulate instructions
 		if *execFlag {
 			s.exec(d.di, in)
-			fmt.Printf(" ; ip=%d, ", s.ip)
+			fmt.Printf(" ; ip=%d, flags=%v | ", s.ip, s.flags)
 			for _, r := range s.regs {
 				fmt.Printf("0x%x ", r)
 			}
