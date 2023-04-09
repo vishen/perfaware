@@ -10,10 +10,69 @@ type simulator struct {
 
 	regs  [12]uint16
 	flags simFlags
+
+	result uint16
 }
 
 func (s *simulator) exec(ip int, in Instruction) {
 	s.ip = ip
+
+	// Handle jumps first
+	// - https://www.tutorialspoint.com/assembly_programming/assembly_conditions.htm
+	// -https://stackoverflow.com/questions/53451732/js-and-jb-instructions-in-assembly
+	/*
+		Mnemonic        Condition tested  Description
+		jo              OF = 1            overflow
+		jno             OF = 0            not overflow
+		jc, jb, jnae    CF = 1            carry / below / not above nor equal
+		jnc, jae, jnb   CF = 0            not carry / above or equal / not below
+		je, jz          ZF = 1            equal / zero
+		jne, jnz        ZF = 0            not equal / not zero
+		jbe, jna        CF or ZF = 1      below or equal / not above
+		ja, jnbe        CF or ZF = 0      above / not below or equal
+		js              SF = 1            sign
+		jns             SF = 0            not sign
+		jp, jpe         PF = 1            parity / parity even
+		jnp, jpo        PF = 0            not parity / parity odd
+		jl, jnge        SF xor OF = 1     less / not greater nor equal
+		jge, jnl        SF xor OF = 0     greater or equal / not less
+		jle, jng    (SF xor OF) or ZF = 1 less or equal / not greater
+		jg, jnle    (SF xor OF) or ZF = 0 greater / not less nor equal
+	*/
+	switch in.Name {
+	case "je":
+		if s.flags.isSet(flagZF) {
+			s.ip += int(in.JumpTarget)
+		}
+		return
+	case "jne":
+		if !s.flags.isSet(flagZF) {
+			s.ip += int(in.JumpTarget)
+		}
+		return
+	case "jp":
+		if s.flags.isSet(flagPF) {
+			s.ip += int(in.JumpTarget)
+		}
+		return
+	case "jb": // jump on below or equal/not above
+		if s.flags.isSet(flagCF) {
+			s.ip += int(in.JumpTarget)
+		}
+		return
+	case "loopnz":
+		// LOOPNZ/LOOPNE decrements CX and jumps to the location specified in the target operand if CX is not 0 and the Zero flag ZF is 0
+
+		// TODO: Find a better way to consolidate this with the rest of the flow and flags below...
+		cx := s.getReg("cx")
+		cx -= 1
+		s.setReg("cx", cx)
+		if cx != 0 {
+			s.ip += int(in.JumpTarget)
+		}
+		return
+	}
+
 	ops := in.Operands()
 
 	reg := ops[0].Reg1
@@ -62,10 +121,13 @@ func (s *simulator) exec(ip int, in Instruction) {
 		if result == 0 {
 			flags.set(flagZF)
 		}
-		// SF is set when result is signed
-		// TODO: Not sure how this works with 8-bit numbers...
+		// If highest 16-bit bit is set
 		if result&0xf000 > 0 {
-			flags.set(flagSF)
+			// TODO: I suspect we can't just always set SF and CF each time, but I don't
+			// understand when one gets set and not the other.
+			// TODO: Not sure how this works with 8-bit numbers...
+			flags.set(flagSF) // For signed operations
+			flags.set(flagCF) // For unsigned operations
 		}
 		// PF is set when the result has even parity; an even-number of
 		// 1 bits.
@@ -75,12 +137,13 @@ func (s *simulator) exec(ip int, in Instruction) {
 
 		/* TODO (Page 22 of manual):
 		- AF: is set when there has been a carry out of the low nibble into the high nibble.
-		- CF: is set when there has been a carry out of the high-order bit result of the 8- or 16-bit
 		- OF: is set when an arthimetic overflow has occured
+		... others
 		*/
 
 		s.flags = flags
 	}
+	s.result = result
 }
 
 func (s *simulator) getReg(reg string) uint16 {

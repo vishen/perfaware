@@ -17,20 +17,20 @@ var (
 )
 
 var sizes = map[string]int{
-	"D":      1,
-	"W":      1,
-	"S":      1,
-	"V":      1,
-	"Z":      1,
-	"MOD":    2,
-	"SR":     2,
-	"REG":    3,
-	"RM":     3,
-	"DISP":   8,
-	"DATA":   8,
-	"DATAW":  8,
-	"ADDR":   8,
-	"REPEAT": 8,
+	"D":     1,
+	"W":     1,
+	"S":     1,
+	"V":     1,
+	"Z":     1,
+	"MOD":   2,
+	"SR":    2,
+	"REG":   3,
+	"RM":    3,
+	"DISP":  8,
+	"DATA":  8,
+	"DATAW": 8,
+	"ADDR":  8,
+	"JUMP":  8,
 }
 
 func sizeOf(val string) int {

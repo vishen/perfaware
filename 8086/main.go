@@ -40,6 +40,10 @@ func main1() int {
 			for _, r := range s.regs {
 				fmt.Printf("0x%x ", r)
 			}
+			// TODO: find a better way to do this.
+			// If we are in exec mode, then the instruction pointer needs to be controlled
+			// via the simulator.
+			d.di = s.ip
 		}
 
 		// Print debug info

@@ -14,6 +14,7 @@ type disassembler struct {
 }
 
 func (d *disassembler) nextInstruction() Instruction {
+	start := d.di
 	b := d.next()
 
 	var flags InstructionFlags
@@ -52,6 +53,7 @@ func (d *disassembler) nextInstruction() Instruction {
 
 	for _, enc := range encs {
 		if in, ok := d.parse(enc); ok {
+			in.Length = d.di - start
 			in.Flags = flags
 			return in
 		}
@@ -147,6 +149,8 @@ func (d *disassembler) parse(enc Encoding) (Instruction, bool) {
 				}
 			case "DATA":
 				in.Data = d.imm8()
+			case "JUMP":
+				in.JumpTarget = d.signedImm8()
 			case "ADDR":
 				if in.W > 0 {
 					in.Data = d.imm16()
@@ -205,7 +209,9 @@ type Instruction struct {
 	Data           uint16
 	Displacement8  int8
 	Displacement16 int16
+	JumpTarget     int8
 	Flags          InstructionFlags
+	Length         int // Length of this instruction in bytes
 }
 
 func (i Instruction) FlagSet(f InstructionFlags) bool {
@@ -217,7 +223,9 @@ type Operand struct {
 	Reg2         string
 	SR           string
 	Imm          uint16
+	ImmSet       bool // TODO: This is stupid. Need a better way to know if a zero-value was set.
 	Displacement int16
+	JumpTarget   int8
 	Ptr          bool
 	UnknownSize  bool
 }
@@ -231,9 +239,11 @@ func (i Instruction) Operands() []Operand {
 		case "RM":
 			ops = append(ops, i.operandRM())
 		case "IMM", "DATA":
-			ops = append(ops, Operand{Imm: i.Data})
+			ops = append(ops, Operand{Imm: i.Data, ImmSet: true})
+		case "JUMP":
+			ops = append(ops, Operand{JumpTarget: i.JumpTarget})
 		case "MEM":
-			ops = append(ops, Operand{Imm: i.Data, Ptr: true})
+			ops = append(ops, Operand{Imm: i.Data, ImmSet: true, Ptr: true})
 		case "ACC":
 			ops = append(ops, i.operandAcc())
 		case "DX":
@@ -365,8 +375,14 @@ func (i Instruction) String() string {
 			}
 		}
 
-		if o.Imm > 0 {
+		if o.ImmSet {
 			sb.WriteString(fmt.Sprintf("%d", o.Imm))
+		}
+
+		if o.JumpTarget > 0 {
+			sb.WriteString(fmt.Sprintf("$+%d", o.JumpTarget))
+		} else if o.JumpTarget < 0 {
+			sb.WriteString(fmt.Sprintf("$%d", o.JumpTarget))
 		}
 
 		if o.Ptr {
