@@ -19,6 +19,38 @@ func main() {
 	for _, t := range tokens {
 		fmt.Println(t)
 	}
+
+	fmt.Println("##############")
+
+	{
+		val, err := find(tokens, "name")
+		fmt.Println(err, val)
+	}
+	{
+		val, err := find(tokens, "x0")
+		fmt.Println(err, val)
+	}
+	{
+		val, err := find(tokens, "points.0.x0")
+		fmt.Println(err, val)
+	}
+	{
+		val, err := find(tokens, "points.0.y0")
+		fmt.Println(err, val)
+	}
+}
+
+func find(tokens []token, key string) (token, error) {
+	returnNextVal := false
+	for _, t := range tokens {
+		if t.typ == tokenKey && string(t.value) == key {
+			returnNextVal = true
+		}
+		if returnNextVal && t.typ == tokenValue {
+			return t, nil
+		}
+	}
+	return token{}, fmt.Errorf("no key %q found", key)
 }
 
 type tokenType int
@@ -80,7 +112,7 @@ func (p *parser) parse() ([]token, error) {
 		}
 		ch := p.eat()
 		switch ch {
-		case '[', ']', '{', '}', ',', ':':
+		case '[', ']', '{', '}', ',':
 			tokens = append(tokens, token{typ: tokenChar, char: ch})
 			nextIsVal = false
 		case '"':
@@ -94,6 +126,8 @@ func (p *parser) parse() ([]token, error) {
 			}
 		case ' ', '\t', '\n':
 			// expected spaces
+		case ':':
+			// ignored
 		default:
 			if ch >= '0' && ch <= '9' {
 				val := append([]byte{ch}, p.eatFloat()...)
